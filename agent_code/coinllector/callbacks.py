@@ -1,14 +1,19 @@
 import numpy as np
+from sklearn.multioutput import MultiOutputRegressor
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from random import shuffle
 
 from settings import s
 from settings import e
 
+actions = ('RIGHT', 'LEFT', 'UP', 'DOWN')
+action_space = len(actions)
+last_actions = []
+
 # Hyperparameters in [0,1]
-alpha = 0.5     # learning rate
-gamma = 0.5     # discount factor
-epsilon = 0.5   # randomness in policy, set to >= 1 when reset == 1
+alpha = 0.8     # learning rate
+gamma = 0.8     # discount factor
+epsilon = 0.0   # randomness in policy, set to >= 1 when reset == 1
 
 # 1: reset weights (overwrite on HDD), 0: use saved weights
 reset = 0
@@ -18,13 +23,12 @@ if reset == 1:
 
 # Regression
 observations = np.zeros((0,5))
-rewards = np.zeros((0,1))
-Q = np.zeros((0,1))
+rewards = np.zeros((0, action_space))
+Q = np.zeros((0, action_space))
 reward_highscore = np.NINF
 #regr = RandomForestRegressor(n_estimators=100)
-regr = GradientBoostingRegressor(loss='ls')
-
-actions = ('RIGHT', 'LEFT', 'UP', 'DOWN')
+#regr = GradientBoostingRegressor(loss='ls')
+regr = MultiOutputRegressor(GradientBoostingRegressor(loss='ls'))
 
 
 def look_for_targets(free_space, start, targets, logger=None):
@@ -75,18 +79,11 @@ def look_for_targets(free_space, start, targets, logger=None):
 
 def find_best_action(observation, logger=None):
     global regr, actions
-    max_reward = np.NINF
-    max_action = 0
-    for i in range(len(actions)):
-        observation[-1] = i
-        current_reward = regr.predict(np.asarray(observation).reshape(1, -1))
-        if logger:
-            self.logger.info(np.asarray(observation).reshape(1, -1))
-            self.logger.debug('{0}: Reward {1}'.format(actions[i], current_reward))
-        if current_reward > max_reward:
-            max_action = i
-            max_reward = current_reward
-    return max_action
+    current_rewards = regr.predict(np.asarray(observation).reshape(1, -1))
+    if logger:
+        logger.info(np.asarray(observation).reshape(1, -1))
+        logger.debug(current_rewards)
+    return np.argmax(current_rewards)
 
 
 def setup(self):
@@ -101,17 +98,18 @@ def setup(self):
     self.logger.debug('Successfully entered setup code')
     if reset == 0:
         self.logger.debug('Loading weights')
-        global observations, rewards, regr, reward_highscore, Q
+        global observations, rewards, regr, reward_highscore, Q, action_space
         observations = np.load('observations.npy')
         rewards = np.load('rewards.npy')
         reward_highscore = np.sum(rewards)
         Q = np.load('Q.npy')
         self.logger.debug('Weights loaded. Training regression model...')
-        regr.fit(observations, Q.ravel())
+        regr.fit(observations, Q)
         self.logger.debug('Model trained')
         self.logger.info('Previous highscore: {0}'.format(reward_highscore))
         observations = np.zeros((0,5))
-        rewards = np.zeros((0,1))
+        rewards = np.zeros((0, action_space))
+        Q = np.zeros((0, action_space))
     np.random.seed()
 
 
@@ -129,7 +127,7 @@ def act(self):
     of self.next_action will be used. The default value is 'WAIT'.
     """
 
-    global epsilon, observations, reg, actions
+    global epsilon, observations, reg, actions, last_action
 
     #self.logger.info('Observing the state')
 
@@ -174,10 +172,10 @@ def act(self):
 
     observation.append(0)
     if np.random.random_sample() < epsilon:
-        observation[-1] = np.random.randint(len(actions))
+        last_actions.append(np.random.randint(len(actions)))
     else:
-        observation[-1] = find_best_action(observation)
-    self.next_action = actions[observation[-1]]
+        last_actions.append(find_best_action(observation, self.logger))
+    self.next_action = actions[last_actions[-1]]
 
     observations = np.vstack((observations, np.asarray(observation)))
 
@@ -193,10 +191,10 @@ def reward_update(self):
     """
     #self.logger.debug(f'Encountered {len(self.events)} game event(s)')
 
-    global rewards, gamma, alpha, observations, regr
+    global rewards, gamma, alpha, observations, regr, action_space, last_actions
 
     if self.game_state['step'] == 2:
-        rewards = np.vstack((rewards, 0))
+        rewards = np.vstack((rewards, np.zeros((0,action_space))))
 
     reward = 0
 
@@ -216,9 +214,14 @@ def reward_update(self):
         else:
             reward = reward - 1
 
+    current_reward = np.zeros((1, action_space))
+    current_reward[0][last_actions[-1]] = reward
+    self.logger.debug(current_reward)
+
     #self.logger.debug('Reward: {0}'.format(reward))
 
     #reward = np.power(gamma, self.game_state['step']) * reward
+    '''
     if self.game_state['step'] > 2:
         if reset == 0:
             new_state_optimum = observations[-1]
@@ -226,8 +229,9 @@ def reward_update(self):
             new_state_reward = regr.predict(np.asarray(new_state_optimum).reshape(1, -1))
             old_state_reward = regr.predict(observations[-2].reshape(1, -1))
             rewards[-1] = old_state_reward + alpha * (rewards[-1] + gamma * new_state_reward - old_state_reward)
+    '''
 
-    rewards = np.vstack((rewards, reward))
+    rewards = np.vstack((rewards, current_reward))
 
 def end_of_episode(self):
     """Called at the end of each game to hand out final rewards and do training.
@@ -237,18 +241,18 @@ def end_of_episode(self):
     final step. You should place your actual learning code in this method.
     """
     #self.logger.debug(f'Encountered {len(self.events)} game event(s) in final step')
-    global regr, observations, rewards, reward_highscore, alpha, gamma, Q, reset
+    global regr, observations, rewards, reward_highscore, alpha, gamma, Q, reset, last_actions, action_space
     #self.logger.debug('Score: {0}'.format(rewards[0]))
 
     # Learning
     if reset == 0:
         for i in range(len(rewards)):
             if i < len(rewards)-1:
-                current_Q = regr.predict(observations[i].reshape(1, -1))
-                next_Q = find_best_action(observations[i+1])
-                current_reward = rewards[i]
-                next_reward = rewards[i+1]
-                Q_s_a = current_Q + alpha * (current_reward + gamma * next_Q - current_Q)
+                current_Q = np.max(regr.predict(observations[i].reshape(1, -1)))
+                next_Q = np.max(regr.predict(observations[i+1].reshape(1, -1)))
+                current_reward = rewards[i][last_actions[i]]
+                Q_s_a = np.zeros((1, action_space))
+                Q_s_a[0][last_actions[i]] = current_Q + alpha * (current_reward + gamma * next_Q - current_Q)
                 Q = np.vstack((Q, Q_s_a))
             else:
                 Q = np.vstack((Q, rewards[i]))
@@ -256,7 +260,8 @@ def end_of_episode(self):
         Q = rewards
         reset = 0
 
-        regr.fit(observations, Q.ravel())
+    Q = np.vstack((Q, np.zeros((1, action_space))))
+    regr.fit(observations, Q)
 
     total = np.sum(rewards)
     self.logger.debug('Return: {0}'.format(total))
@@ -268,6 +273,6 @@ def end_of_episode(self):
     np.save('rewards.npy', rewards)
     np.save('Q.npy', Q)
     observations = np.zeros((0,5))
-    rewards = np.zeros((0,1))
-    Q = np.zeros((0,1))
-    self.logger.debug(regr.feature_importances_)
+    rewards = np.zeros((0, action_space))
+    Q = np.zeros((0, action_space))
+    #self.logger.debug(regr.feature_importances_)
