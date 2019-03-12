@@ -6,19 +6,23 @@ from settings import s
 from settings import e
 
 # Hyperparameters in [0,1]
-alpha = 0.8     # learning rate
-gamma = 0.95    # discount factor
-epsilon = 0.2   # randomness in policy, set to >= 1 when reset == 1
+alpha = 0.5     # learning rate
+gamma = 0.5     # discount factor
+epsilon = 0.5   # randomness in policy, set to >= 1 when reset == 1
 
 # 1: reset weights (overwrite on HDD), 0: use saved weights
 reset = 0
 
+if reset == 1:
+    epsilon = 1
+
 # Regression
-observations = np.zeros((0,3))
+observations = np.zeros((0,5))
 rewards = np.zeros((0,1))
+Q = np.zeros((0,1))
 reward_highscore = np.NINF
-regr = RandomForestRegressor(n_estimators=100)
-#regr = GradientBoostingRegressor(loss='ls')
+#regr = RandomForestRegressor(n_estimators=100)
+regr = GradientBoostingRegressor(loss='ls')
 
 actions = ('RIGHT', 'LEFT', 'UP', 'DOWN')
 
@@ -97,16 +101,16 @@ def setup(self):
     self.logger.debug('Successfully entered setup code')
     if reset == 0:
         self.logger.debug('Loading weights')
-        global observations, rewards, reg, reward_highscore
+        global observations, rewards, regr, reward_highscore, Q
         observations = np.load('observations.npy')
         rewards = np.load('rewards.npy')
-        reward_highscore = np.mean(rewards)
+        reward_highscore = np.sum(rewards)
+        Q = np.load('Q.npy')
         self.logger.debug('Weights loaded. Training regression model...')
-        global reg, alpha, gamma, epsilon
-        regr.fit(observations, rewards.ravel())
+        regr.fit(observations, Q.ravel())
         self.logger.debug('Model trained')
         self.logger.info('Previous highscore: {0}'.format(reward_highscore))
-        observations = np.zeros((0,3))
+        observations = np.zeros((0,5))
         rewards = np.zeros((0,1))
     np.random.seed()
 
@@ -151,8 +155,8 @@ def act(self):
             countdown = t;
             break;
 
-    # observation = [relative next coin, action]
-    observation = []
+    # observation = [agent, relative next coin, action]
+    observation = [x,y]
 
     # Find relative coordinates or (0,0) if target non-existent
     for target in targets:
@@ -189,7 +193,7 @@ def reward_update(self):
     """
     #self.logger.debug(f'Encountered {len(self.events)} game event(s)')
 
-    global rewards, gamma, alpha, observations
+    global rewards, gamma, alpha, observations, regr
 
     if self.game_state['step'] == 2:
         rewards = np.vstack((rewards, 0))
@@ -198,28 +202,30 @@ def reward_update(self):
 
     for event in self.events:
         if event == e.INVALID_ACTION:
-            reward = reward - 10
+            reward = reward - 5
         elif event == e.CRATE_DESTROYED:
             reward = reward + 10
         elif event == e.COIN_COLLECTED:
-            reward = reward + 100
+            reward = reward + 50
         elif event == e.KILLED_OPPONENT:
-            reward = reward + 100
+            reward = reward + 10
         elif event == e.KILLED_SELF:
-            reward = reward - 100
-        elif event == e.SURVIVED_ROUND:
-            reward = reward + 100
+            reward = reward - 10
+        #elif event == e.SURVIVED_ROUND:
+        #    reward = reward + 100
+        else:
+            reward = reward - 1
 
     #self.logger.debug('Reward: {0}'.format(reward))
 
-    reward = np.power(gamma, self.game_state['step']) * reward
-
-    if reset == 0:
-        new_state_optimum = observations[-1]
-        new_state_optimum[-1] = find_best_action(observations[-1])
-        new_state_reward = regr.predict(np.asarray(new_state_optimum).reshape(1, -1))
-        new_state_reward = np.power(gamma, self.game_state['step']+1) * new_state_reward
-        rewards[-1] = (1-alpha)*rewards[-1] + alpha*new_state_reward
+    #reward = np.power(gamma, self.game_state['step']) * reward
+    if self.game_state['step'] > 2:
+        if reset == 0:
+            new_state_optimum = observations[-1]
+            new_state_optimum[-1] = find_best_action(observations[-1])
+            new_state_reward = regr.predict(np.asarray(new_state_optimum).reshape(1, -1))
+            old_state_reward = regr.predict(observations[-2].reshape(1, -1))
+            rewards[-1] = old_state_reward + alpha * (rewards[-1] + gamma * new_state_reward - old_state_reward)
 
     rewards = np.vstack((rewards, reward))
 
@@ -231,16 +237,37 @@ def end_of_episode(self):
     final step. You should place your actual learning code in this method.
     """
     #self.logger.debug(f'Encountered {len(self.events)} game event(s) in final step')
-    global reg, observations, rewards, reward_highscore, alpha
+    global regr, observations, rewards, reward_highscore, alpha, gamma, Q, reset
     #self.logger.debug('Score: {0}'.format(rewards[0]))
-    total = np.mean(rewards)
-    self.logger.debug('Mean reward: {0}'.format(total))
-    self.logger.debug('Previous highest mean: {0}'.format(reward_highscore))
+
+    # Learning
+    if reset == 0:
+        for i in range(len(rewards)):
+            if i < len(rewards)-1:
+                current_Q = regr.predict(observations[i].reshape(1, -1))
+                next_Q = find_best_action(observations[i+1])
+                current_reward = rewards[i]
+                next_reward = rewards[i+1]
+                Q_s_a = current_Q + alpha * (current_reward + gamma * next_Q - current_Q)
+                Q = np.vstack((Q, Q_s_a))
+            else:
+                Q = np.vstack((Q, rewards[i]))
+    else:
+        Q = rewards
+        reset = 0
+
+        regr.fit(observations, Q.ravel())
+
+    total = np.sum(rewards)
+    self.logger.debug('Return: {0}'.format(total))
+    self.logger.debug('Previous highest return: {0}'.format(reward_highscore))
     if total > reward_highscore:
         reward_highscore = total
-    regr.fit(observations, rewards.ravel())
+
     np.save('observations.npy', observations)
     np.save('rewards.npy', rewards)
-    observations = np.zeros((0,3))
+    np.save('Q.npy', Q)
+    observations = np.zeros((0,5))
     rewards = np.zeros((0,1))
+    Q = np.zeros((0,1))
     self.logger.debug(regr.feature_importances_)
