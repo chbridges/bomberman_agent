@@ -110,9 +110,9 @@ def setup(self):
     if reset == 0:
         self.logger.debug('Loading weights')
         global observations, rewards, regr, reward_highscore, Q, action_space
-        observations = np.load('observations.npy')
-        rewards = np.load('rewards.npy')
-        Q = np.load('Q.npy')
+        observations = np.load('./agent_code/coinllector/observations.npy')
+        rewards = np.load('./agent_code/coinllector/rewards.npy')
+        Q = np.load('./agent_code/coinllector/Q.npy')
         self.logger.debug(Q.shape)
         self.logger.debug('Weights loaded. Training regression model...')
         regr.fit(observations, Q)
@@ -257,6 +257,6 @@ def end_of_episode(self):
     Q = Q[-10000:]
 
     # Save the weights in the same folder as main.py
-    np.save('observations.npy', observations)
-    np.save('rewards.npy', rewards)
-    np.save('Q.npy', Q)
+    np.save('./agent_code/coinllector/observations.npy', observations)
+    np.save('./agent_code/coinllector/rewards.npy', rewards)
+    np.save('./agent_code/coinllector/Q.npy', Q)
