@@ -6,26 +6,27 @@ from random import shuffle
 from settings import s
 from settings import e
 
-actions = ('RIGHT', 'LEFT', 'UP', 'DOWN')
+actions = ('LEFT', 'RIGHT', 'UP', 'DOWN')
 action_space = len(actions)
 last_actions = []
 
 # Hyperparameters in [0,1]
-alpha = 0.55     # learning rate
-gamma = 0.95     # discount factor
-epsilon = 0.75   # randomness in policy
+alpha = 0.25     # learning rate
+gamma = 0.85     # discount factor
+epsilon = 0.05   # randomness in policy
 
 # 1: reset weights (overwrite on HDD), 0: use saved weights
-reset = 1
+reset = 0
 
-if reset == 1:
-    epsilon = 1
+# State representation: Relative coordinates
+# [left, right, top, bottom, next coin x, next coin y]
+n_features = 6
 
 # Regression
-observations = np.zeros((0,2))
+observations = np.zeros((0, n_features))
 rewards = np.zeros((0, action_space))
 Q = np.zeros((0, action_space))
-regr = MultiOutputRegressor(LGBMRegressor(n_estimators=100, n_jobs=-1))
+regr = MultiOutputRegressor(LGBMRegressor())
 
 
 def look_for_targets(free_space, start, targets, logger=None):
@@ -160,8 +161,12 @@ def act(self):
             countdown = t;
             break;
 
-    # observation = [relative next coin]
-    observation = []
+    # adjacent fields
+    left = arena[x-1, y]
+    right = arena[x+1, y]
+    top = arena[x, y+1]
+    bottom = arena[x, y-1]
+    observation = [left, right, top, bottom]
 
     # Find relative coordinates or (0,0) if target non-existent
     for target in targets:
@@ -177,7 +182,7 @@ def act(self):
     observations = np.vstack((observations, np.asarray(observation)))
 
     # Execute a random action or find the best action depending on epsilon
-    if np.random.random_sample() < epsilon:
+    if np.random.random_sample() < epsilon or reset == 1:
         last_actions.append(np.random.randint(len(actions)))
     else:
         last_actions.append(find_best_action(observation, self.logger))
@@ -205,13 +210,13 @@ def reward_update(self):
         if event == e.INVALID_ACTION:
             reward = reward - 5
         elif event == e.COIN_COLLECTED:
-            reward = reward + 50
+            reward = reward + 100
         else:
             reward = reward - 1
 
     current_reward = np.zeros((1, action_space))
     current_reward[0][last_actions[-1]] = reward
-    self.logger.debug(f'Reward: {current_reward}')
+    #self.logger.debug(f'Reward: {current_reward}')
 
     rewards = np.vstack((rewards, current_reward))
 
@@ -247,9 +252,9 @@ def end_of_episode(self):
     #Q = np.vstack((Q, np.zeros((1, action_space))))
     regr.fit(observations, Q)
 
-    observations = observations[-1000:]
-    rewards = rewards[-1000:]
-    Q = Q[-1000:]
+    observations = observations[-10000:]
+    rewards = rewards[-10000:]
+    Q = Q[-10000:]
 
     # Save the weights in the same folder as main.py
     np.save('observations.npy', observations)
