@@ -1,6 +1,6 @@
 import numpy as np
 from sklearn.multioutput import MultiOutputRegressor
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from lightgbm import LGBMRegressor
 from random import shuffle
 
 from settings import s
@@ -11,12 +11,12 @@ action_space = len(actions)
 last_actions = []
 
 # Hyperparameters in [0,1]
-alpha = 0.25     # learning rate
-gamma = 0.75     # discount factor
-epsilon = 0.25   # randomness in policy
+alpha = 0.55     # learning rate
+gamma = 0.95     # discount factor
+epsilon = 0.75   # randomness in policy
 
 # 1: reset weights (overwrite on HDD), 0: use saved weights
-reset = 0
+reset = 1
 
 if reset == 1:
     epsilon = 1
@@ -25,10 +25,7 @@ if reset == 1:
 observations = np.zeros((0,2))
 rewards = np.zeros((0, action_space))
 Q = np.zeros((0, action_space))
-reward_highscore = np.NINF
-#regr = RandomForestRegressor(n_estimators=100)
-#regr = GradientBoostingRegressor(loss='ls')
-regr = MultiOutputRegressor(GradientBoostingRegressor(loss='ls'))
+regr = MultiOutputRegressor(LGBMRegressor(n_estimators=100, n_jobs=-1))
 
 
 def look_for_targets(free_space, start, targets, logger=None):
@@ -113,12 +110,12 @@ def setup(self):
         self.logger.debug('Loading weights')
         global observations, rewards, regr, reward_highscore, Q, action_space
         observations = np.load('observations.npy')
+        rewards = np.load('rewards.npy')
         Q = np.load('Q.npy')
+        self.logger.debug(Q.shape)
         self.logger.debug('Weights loaded. Training regression model...')
         regr.fit(observations, Q)
         self.logger.debug('Model trained')
-        observations = np.zeros((0,2))
-        Q = np.zeros((0, action_space))
     np.random.seed()
 
 
@@ -136,7 +133,7 @@ def act(self):
     of self.next_action will be used. The default value is 'WAIT'.
     """
 
-    global epsilon, observations, reg, actions, last_action
+    global epsilon, observations, regr, actions, last_action
 
     #self.logger.info('Observing the state')
 
@@ -207,14 +204,8 @@ def reward_update(self):
     for event in self.events:
         if event == e.INVALID_ACTION:
             reward = reward - 5
-        elif event == e.CRATE_DESTROYED:
-            reward = reward + 10
         elif event == e.COIN_COLLECTED:
             reward = reward + 50
-        elif event == e.KILLED_OPPONENT:
-            reward = reward + 10
-        elif event == e.KILLED_SELF:
-            reward = reward - 10
         else:
             reward = reward - 1
 
@@ -234,12 +225,15 @@ def end_of_episode(self):
     self.logger.debug(f'Encountered {len(self.events)} game event(s) in final step')
     global regr, observations, rewards, reward_highscore, alpha, gamma, Q, reset, last_actions, action_space
 
+    observations = observations[:-1]
+
     # Learning
+    Q = np.zeros((0, action_space))
     if reset == 0:
         for i in range(len(rewards)):
             if i < len(rewards)-1:
                 current_Q = np.max(regr.predict(observations[i].reshape(1, -1)))    # Find Q*(s, a)
-                next_Q = np.max(regr.predict(observations[i+1].reshape(1, -1)))     # Find Q*(s', a')
+                next_Q = np.max(regr.predict(observations[i+1].reshape(1, -1)))     # Find Q*(s', a')ü
                 current_reward = rewards[i][last_actions[i]]                        # Find r
                 Q_s_a = np.zeros((1, action_space))
                 Q_s_a[0][last_actions[i]] = current_Q + alpha * (current_reward + gamma * next_Q - current_Q)
@@ -250,21 +244,14 @@ def end_of_episode(self):
         Q = rewards
         reset = 0
 
-    Q = np.vstack((Q, np.zeros((1, action_space))))
+    #Q = np.vstack((Q, np.zeros((1, action_space))))
     regr.fit(observations, Q)
 
-    # Save reward highscore of current session for debugging purposes
-    total = np.sum(rewards)
-    self.logger.debug('Return: {0}'.format(total))
-    self.logger.debug('Previous highest return: {0}'.format(reward_highscore))
-    if total > reward_highscore:
-        reward_highscore = total
+    observations = observations[-1000:]
+    rewards = rewards[-1000:]
+    Q = Q[-1000:]
 
     # Save the weights in the same folder as main.py
     np.save('observations.npy', observations)
+    np.save('rewards.npy', rewards)
     np.save('Q.npy', Q)
-
-    # Reset the observations and rewards for the next episode
-    observations = np.zeros((0,2))
-    rewards = np.zeros((0, action_space))
-    Q = np.zeros((0, action_space))
