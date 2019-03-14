@@ -6,17 +6,15 @@ from random import shuffle
 from settings import s
 from settings import e
 
+# Actions
 actions = ('LEFT', 'RIGHT', 'UP', 'DOWN')
 action_space = len(actions)
-last_actions = []
+last_actions = np.zeros((0,1), dtype=np.int8)
 
 # Hyperparameters in [0,1]
-alpha = 0.25     # learning rate
-gamma = 0.85     # discount factor
-epsilon = 0.05   # randomness in policy
-
-# 1: reset weights (overwrite on HDD), 0: use saved weights
-reset = 0
+alpha = 0.55     # learning rate
+gamma = 0.95     # discount factor
+epsilon = 0.50   # randomness in policy
 
 # State representation: Relative coordinates
 # [left, right, top, bottom, next coin x, next coin y]
@@ -27,6 +25,14 @@ observations = np.zeros((0, n_features))
 rewards = np.zeros((0, action_space))
 Q = np.zeros((0, action_space))
 regr = MultiOutputRegressor(LGBMRegressor())
+
+# 1: reset weights (overwrite on HDD)
+# 0: use saved weights
+reset = 0
+
+# 1: clean duplicates from the Q-table before fitting the regression model
+# 0: keep all last 10000 entries
+clean = 0
 
 
 def look_for_targets(free_space, start, targets, logger=None):
@@ -109,10 +115,11 @@ def setup(self):
     self.logger.debug('Successfully entered setup code')
     if reset == 0:
         self.logger.debug('Loading weights')
-        global observations, rewards, regr, reward_highscore, Q, action_space
+        global observations, rewards, regr, reward_highscore, Q, action_space, last_actions
         observations = np.load('./agent_code/coinllector/observations.npy')
         rewards = np.load('./agent_code/coinllector/rewards.npy')
         Q = np.load('./agent_code/coinllector/Q.npy')
+        last_actions = np.load('./agent_code/coinllector/last_actions.npy')
         self.logger.debug(Q.shape)
         self.logger.debug('Weights loaded. Training regression model...')
         regr.fit(observations, Q)
@@ -134,7 +141,7 @@ def act(self):
     of self.next_action will be used. The default value is 'WAIT'.
     """
 
-    global epsilon, observations, regr, actions, last_action
+    global epsilon, observations, regr, actions, last_actions
 
     #self.logger.info('Observing the state')
 
@@ -183,10 +190,10 @@ def act(self):
 
     # Execute a random action or find the best action depending on epsilon
     if np.random.random_sample() < epsilon or reset == 1:
-        last_actions.append(np.random.randint(len(actions)))
+        last_actions = np.vstack((last_actions, np.random.randint(len(actions))))
     else:
-        last_actions.append(find_best_action(observation, self.logger))
-    self.next_action = actions[last_actions[-1]]
+        last_actions = np.vstack((last_actions, find_best_action(observation, self.logger)))
+    self.next_action = actions[last_actions[-1][0]]
 
 def reward_update(self):
     """Called once per step to allow intermediate rewards based on game events.
@@ -239,7 +246,7 @@ def end_of_episode(self):
             if i < len(rewards)-1:
                 current_Q = np.max(regr.predict(observations[i].reshape(1, -1)))    # Find Q*(s, a)
                 next_Q = np.max(regr.predict(observations[i+1].reshape(1, -1)))     # Find Q*(s', a')ü
-                current_reward = rewards[i][last_actions[i]]                        # Find r
+                current_reward = rewards[i][last_actions[i][0]]                     # Find r
                 Q_s_a = np.zeros((1, action_space))
                 Q_s_a[0][last_actions[i]] = current_Q + alpha * (current_reward + gamma * next_Q - current_Q)
                 Q = np.vstack((Q, Q_s_a))
@@ -249,14 +256,25 @@ def end_of_episode(self):
         Q = rewards
         reset = 0
 
-    #Q = np.vstack((Q, np.zeros((1, action_space))))
-    regr.fit(observations, Q)
-
+    # Only save the last 10000 results
     observations = observations[-10000:]
     rewards = rewards[-10000:]
     Q = Q[-10000:]
+    last_actions = last_actions[-10000:]
+
+    # Fit the regression model
+    if clean == 0:
+        regr.fit(observations, Q)
+    else:
+        # Remove duplicates where s=s', Q(s,a)=Q(s',a')
+        unique_indices = np.unique(np.hstack((observations, Q)), axis=0, return_index=True)[1]
+        relevant_Q = np.take(Q, unique_indices, axis=0)
+        corresponding_states = np.take(observations, unique_indices, axis=0)
+        self.logger.debug(Q.shape)
+        regr.fit(corresponding_states, relevant_Q)
 
     # Save the weights in the same folder as main.py
     np.save('./agent_code/coinllector/observations.npy', observations)
     np.save('./agent_code/coinllector/rewards.npy', rewards)
     np.save('./agent_code/coinllector/Q.npy', Q)
+    np.save('./agent_code/coinllector/last_actions.npy', last_actions)
