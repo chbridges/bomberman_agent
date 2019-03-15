@@ -113,14 +113,14 @@ def setup(self):
     file for debugging (see https://docs.python.org/3.7/library/logging.html).
     """
     self.logger.debug('Successfully entered setup code')
-    global observations, rewards, regr, reward_highscore, Q, action_space, last_actions, clean, reset
+    global observations, rewards, last_actions, Q, regr, reset, clean
     if reset == 0:
         self.logger.debug('Loading weights')
         observations = np.load('observations.npy')
         rewards = np.load('rewards.npy')
         Q = np.load('Q.npy')
         last_actions = np.load('last_actions.npy')
-        self.logger.debug(Q.shape)
+        self.logger.debug(f'Data: {Q.shape}')
         self.logger.debug('Weights loaded. Training regression model...')
         if clean == 0:
             regr.fit(observations, Q)
@@ -129,7 +129,7 @@ def setup(self):
             unique_indices = np.unique(np.hstack((observations, Q)), axis=0, return_index=True)[1]
             relevant_Q = np.take(Q, unique_indices, axis=0)
             corresponding_states = np.take(observations, unique_indices, axis=0)
-            self.logger.debug(Q.shape)
+            self.logger.debug(f'Cleaned: {relevant_Q.shape}')
             regr.fit(corresponding_states, relevant_Q)
         self.logger.debug('Model trained')
     np.random.seed()
@@ -151,39 +151,24 @@ def act(self):
 
     global epsilon, observations, regr, actions, last_actions
 
-    #self.logger.info('Observing the state')
-
     # Gather information about the game state
     arena = self.game_state['arena']
     x, y, _, bombs_left, score = self.game_state['self']
-    bombs = self.game_state['bombs']
-    bomb_xys = [(x,y) for (x,y,t) in bombs]
-    others = [(x,y) for (x,y,n,b,s) in self.game_state['others']]
     coins = self.game_state['coins']
-    crates = [(x,y) for x in range(1,16) for y in range(1,16) if (arena[x,y] == 1)]
 
-    # Find absolute coordinates of the most immediately interesting targets
+    # Find absolute coordinates of the most immediately coin
     free_space = arena == 0
     targets = []
-
-    #targets.append(look_for_targets(free_space, (x,y), coins, self.logger))
     targets.append(look_for_targets(free_space, (x,y), coins))
 
-    # Find the countdown of the cloest bomb
-    countdown = 0
-    for (x,y,t) in bombs:
-        if (x,y) == targets[-1]:
-            countdown = t;
-            break;
-
-    # adjacent fields
+    # Find the adjacent fields
     left = arena[x-1, y]
     right = arena[x+1, y]
     top = arena[x, y+1]
     bottom = arena[x, y-1]
     observation = [left, right, top, bottom]
 
-    # Find relative coordinates or (0,0) if target non-existent
+    # Find relative coordinates of targets or (0,0) if target non-existent
     for target in targets:
         if target != None:
             target = (target[0]-x, target[1]-y)
@@ -212,15 +197,12 @@ def reward_update(self):
     agent based on these events and your knowledge of the (new) game state. In
     contrast to act, this method has no time limit.
     """
-    #self.logger.debug(f'Encountered {len(self.events)} game event(s)')
 
     global rewards, action_space, last_actions
-    '''
-    if self.game_state['step'] == 2:
-        rewards = np.vstack((rewards, np.zeros((0,action_space))))
-    '''
+
     reward = 0
 
+    # Positive rewards for good actions, negative rewards for bad actions
     for event in self.events:
         if event == e.INVALID_ACTION:
             reward = reward - 5
@@ -229,10 +211,9 @@ def reward_update(self):
         else:
             reward = reward - 1
 
+    # Save reward in rewards list in the corresponding column for the executed action
     current_reward = np.zeros((1, action_space))
     current_reward[0][last_actions[-1]] = reward
-    #self.logger.debug(f'Reward: {current_reward}')
-
     rewards = np.vstack((rewards, current_reward))
 
 def end_of_episode(self):
@@ -242,12 +223,13 @@ def end_of_episode(self):
     game. self.events will contain all events that occured during your agent's
     final step. You should place your actual learning code in this method.
     """
-    self.logger.debug(f'Encountered {len(self.events)} game event(s) in final step')
-    global regr, observations, rewards, reward_highscore, alpha, gamma, Q, reset, last_actions, action_space
 
+    global regr, observations, rewards, Q, alpha, gamma, last_actions, action_space, reset, clean
+
+    # We don't give rewards in the final step, as our agent always survives
     observations = observations[:-1]
 
-    # Learning
+    # Learning according to the update rule given in our report
     Q = np.zeros((0, action_space))
     if reset == 0:
         for i in range(len(rewards)):
@@ -259,7 +241,7 @@ def end_of_episode(self):
                 Q_s_a[0][last_actions[i]] = current_Q + alpha * (current_reward + gamma * next_Q - current_Q)
                 Q = np.vstack((Q, Q_s_a))
             else:
-                Q = np.vstack((Q, rewards[i]))
+                Q = np.vstack((Q, rewards[i])) # Final state
     else:
         Q = rewards
         reset = 0

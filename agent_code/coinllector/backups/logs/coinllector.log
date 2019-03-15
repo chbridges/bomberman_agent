@@ -2,9 +2,9 @@
 2019-03-15 14:07:20,438 [coinllector_wrapper] INFO: Initialize agent code
 2019-03-15 14:07:20,438 [coinllector_code] DEBUG: Successfully entered setup code
 2019-03-15 14:07:20,438 [coinllector_code] DEBUG: Loading weights
-2019-03-15 14:07:20,446 [coinllector_code] DEBUG: (39702, 4)
+2019-03-15 14:07:20,446 [coinllector_code] DEBUG: Data: (39702, 4)
 2019-03-15 14:07:20,446 [coinllector_code] DEBUG: Weights loaded. Training regression model...
-2019-03-15 14:07:20,633 [coinllector_code] DEBUG: (39702, 4)
+2019-03-15 14:07:20,633 [coinllector_code] DEBUG: Cleaned: (14773, 4)
 2019-03-15 14:07:21,383 [coinllector_code] DEBUG: Model trained
 2019-03-15 14:07:21,394 [coinllector_wrapper] INFO: STARTING ROUND #1
 2019-03-15 14:07:21,488 [coinllector_wrapper] INFO: STARTING STEP 1
