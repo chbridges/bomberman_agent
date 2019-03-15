@@ -12,9 +12,9 @@ action_space = len(actions)
 last_actions = np.zeros((0,1), dtype=np.int8)
 
 # Hyperparameters in [0,1]
-alpha = 0.55     # learning rate
+alpha = 0.75     # learning rate
 gamma = 0.95     # discount factor
-epsilon = 0.50   # randomness in policy
+epsilon = 0.25   # randomness in policy
 
 # State representation: Relative coordinates
 # [left, right, top, bottom, next coin x, next coin y]
@@ -24,7 +24,7 @@ n_features = 6
 observations = np.zeros((0, n_features))
 rewards = np.zeros((0, action_space))
 Q = np.zeros((0, action_space))
-regr = MultiOutputRegressor(LGBMRegressor())
+regr = MultiOutputRegressor(LGBMRegressor(sparse_threshold=0.7, zero_as_missing=True, use_missing=False))
 
 # 1: reset weights (overwrite on HDD)
 # 0: use saved weights
@@ -32,7 +32,7 @@ reset = 0
 
 # 1: clean duplicates from the Q-table before fitting the regression model
 # 0: keep all last 10000 entries
-clean = 0
+clean = 1
 
 
 def look_for_targets(free_space, start, targets, logger=None):
@@ -113,16 +113,24 @@ def setup(self):
     file for debugging (see https://docs.python.org/3.7/library/logging.html).
     """
     self.logger.debug('Successfully entered setup code')
+    global observations, rewards, regr, reward_highscore, Q, action_space, last_actions, clean, reset
     if reset == 0:
         self.logger.debug('Loading weights')
-        global observations, rewards, regr, reward_highscore, Q, action_space, last_actions
-        observations = np.load('./agent_code/coinllector/observations.npy')
-        rewards = np.load('./agent_code/coinllector/rewards.npy')
-        Q = np.load('./agent_code/coinllector/Q.npy')
-        last_actions = np.load('./agent_code/coinllector/last_actions.npy')
+        observations = np.load('observations.npy')
+        rewards = np.load('rewards.npy')
+        Q = np.load('Q.npy')
+        last_actions = np.load('last_actions.npy')
         self.logger.debug(Q.shape)
         self.logger.debug('Weights loaded. Training regression model...')
-        regr.fit(observations, Q)
+        if clean == 0:
+            regr.fit(observations, Q)
+        else:
+            # Remove duplicates where s=s', Q(s,a)=Q(s',a')
+            unique_indices = np.unique(np.hstack((observations, Q)), axis=0, return_index=True)[1]
+            relevant_Q = np.take(Q, unique_indices, axis=0)
+            corresponding_states = np.take(observations, unique_indices, axis=0)
+            self.logger.debug(Q.shape)
+            regr.fit(corresponding_states, relevant_Q)
         self.logger.debug('Model trained')
     np.random.seed()
 
@@ -256,12 +264,6 @@ def end_of_episode(self):
         Q = rewards
         reset = 0
 
-    # Only save the last 10000 results
-    observations = observations[-10000:]
-    rewards = rewards[-10000:]
-    Q = Q[-10000:]
-    last_actions = last_actions[-10000:]
-
     # Fit the regression model
     if clean == 0:
         regr.fit(observations, Q)
@@ -274,7 +276,7 @@ def end_of_episode(self):
         regr.fit(corresponding_states, relevant_Q)
 
     # Save the weights in the same folder as main.py
-    np.save('./agent_code/coinllector/observations.npy', observations)
-    np.save('./agent_code/coinllector/rewards.npy', rewards)
-    np.save('./agent_code/coinllector/Q.npy', Q)
-    np.save('./agent_code/coinllector/last_actions.npy', last_actions)
+    np.save('observations.npy', observations)
+    np.save('rewards.npy', rewards)
+    np.save('Q.npy', Q)
+    np.save('last_actions.npy', last_actions)
