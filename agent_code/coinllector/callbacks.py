@@ -24,7 +24,7 @@ n_features = 6
 observations = np.zeros((0, n_features))
 rewards = np.zeros((0, action_space))
 Q = np.zeros((0, action_space))
-regr = MultiOutputRegressor(LGBMRegressor(sparse_threshold=0.7, zero_as_missing=True, use_missing=False))
+regr = MultiOutputRegressor(LGBMRegressor(zero_as_missing=True, use_missing=False))
 
 # 1: reset weights (overwrite on HDD)
 # 0: use saved weights
@@ -245,13 +245,14 @@ def end_of_episode(self):
     # Learning according to the update rule given in our report
     Q = np.zeros((0, action_space))
     if reset == 0:
-        for i in range(len(rewards)):
-            if i < len(rewards)-1:
-                current_Q = np.max(regr.predict(observations[i].reshape(1, -1)))    # Find Q*(s, a)
-                next_Q = np.max(regr.predict(observations[i+1].reshape(1, -1)))     # Find Q*(s', a')ü
-                current_reward = rewards[i][last_actions[i][0]]                     # Find r
+        Q_values = np.amax(regr.predict(observations), axis=1)  # Predict Q(s,a) with the current fitted model
+        for i in range(len(Q_values)):
+            if i < len(Q_values)-1:
+                last_action = last_actions[i][0]
+                current_reward = rewards[i][last_action]    # Find r
+                td = np.subtract(np.add(current_reward, np.multiply(gamma, Q_values[i+1])), Q_values[i])    # Find TD-error of current (s,a) tuple
                 Q_s_a = np.zeros((1, action_space))
-                Q_s_a[0][last_actions[i]] = current_Q + alpha * (current_reward + gamma * next_Q - current_Q)
+                Q_s_a[0][last_action] = np.add(Q_values[i], np.multiply(alpha, td))
                 Q = np.vstack((Q, Q_s_a))
             else:
                 Q = np.vstack((Q, rewards[i])) # Final state
@@ -267,7 +268,6 @@ def end_of_episode(self):
         unique_indices = np.unique(np.hstack((observations, Q)), axis=0, return_index=True)[1]
         relevant_Q = np.take(Q, unique_indices, axis=0)
         corresponding_states = np.take(observations, unique_indices, axis=0)
-        self.logger.debug(Q.shape)
         regr.fit(corresponding_states, relevant_Q)
 
     # Save the weights in the same folder as main.py
