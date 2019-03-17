@@ -31,7 +31,7 @@ regr = MultiOutputRegressor(LGBMRegressor(sparse_threshold=0.7, zero_as_missing=
 reset = 0
 
 # 1: clean duplicates from the Q-table before fitting the regression model
-# 0: keep all last 10000 entries
+# 0: keep all entries
 clean = 1
 
 
@@ -226,8 +226,21 @@ def end_of_episode(self):
 
     global regr, observations, rewards, Q, alpha, gamma, last_actions, action_space, reset, clean
 
-    # We don't give rewards in the final step, as our agent always survives
-    observations = observations[:-1]
+    # Final rewards, copied from reward_update()
+    reward = 0
+
+    for event in self.events:
+        if event == e.INVALID_ACTION:
+            reward = reward - 5
+        elif event == e.COIN_COLLECTED:
+            reward = reward + 100
+        else:
+            reward = reward - 1
+
+    # Save reward in rewards list in the corresponding column for the executed action
+    current_reward = np.zeros((1, action_space))
+    current_reward[0][last_actions[-1]] = reward
+    rewards = np.vstack((rewards, current_reward))
 
     # Learning according to the update rule given in our report
     Q = np.zeros((0, action_space))
