@@ -26,13 +26,13 @@ rewards = np.zeros((0, action_space))
 Q = np.zeros((0, action_space))
 regr = MultiOutputRegressor(LGBMRegressor(zero_as_missing=True, use_missing=False))
 
-# 1: reset weights (overwrite on HDD)
-# 0: use saved weights
-reset = 1
+# True: reset weights (overwrite on HDD)
+# False: use saved weights
+reset = False
 
-# 1: clean duplicates from the Q-table before fitting the regression model
-# 0: use all recorded episodes
-clean = 1
+# True: clean duplicates from the Q-table before fitting the regression model
+# False: fit model to all collected data
+clean = True
 
 
 def look_for_targets(free_space, start, targets, logger=None):
@@ -114,7 +114,7 @@ def setup(self):
     """
     self.logger.debug('Successfully entered setup code')
     global observations, rewards, last_actions, Q, regr, reset, clean
-    if reset == 0:
+    if not reset:
         self.logger.debug('Loading weights')
         observations = np.load('observations.npy')
         rewards = np.load('rewards.npy')
@@ -122,15 +122,15 @@ def setup(self):
         last_actions = np.load('last_actions.npy')
         self.logger.debug(f'Data: {observations.shape}\t{Q.shape}')
         self.logger.debug('Weights loaded. Training regression model...')
-        if clean == 0:
-            regr.fit(observations, Q)
-        else:
+        if clean:
             # Remove duplicates where s=s', Q(s,a)=Q(s',a')
             unique_indices = np.unique(np.hstack((observations, Q)), axis=0, return_index=True)[1]
             relevant_Q = np.take(Q, unique_indices, axis=0)
             corresponding_states = np.take(observations, unique_indices, axis=0)
             self.logger.debug(f'Cleaned: {relevant_Q.shape}')
             regr.fit(corresponding_states, relevant_Q)
+        else:
+            regr.fit(observations, Q)
         self.logger.debug('Model trained')
     np.random.seed()
 
@@ -272,7 +272,7 @@ def end_of_episode(self):
 
     # Learning according to the update rule given in our report
     Q = np.zeros((0, action_space))
-    if reset == 0:
+    if not reset:
         Q_values = np.amax(regr.predict(observations), axis=1)  # Predict Q(s,a) with the current fitted model
         for i in range(len(Q_values)):
             if i < len(Q_values)-1:
@@ -292,14 +292,14 @@ def end_of_episode(self):
     # an exception will be thrown until there is sufficient data
     try:
         # Fit the regression model
-        if clean == 0:
-            regr.fit(observations, Q)
-        else:
+        if clean:
             # Remove duplicates where s=s', Q(s,a)=Q(s',a')
             unique_indices = np.unique(np.hstack((observations, Q)), axis=0, return_index=True)[1]
             relevant_Q = np.take(Q, unique_indices, axis=0)
             corresponding_states = np.take(observations, unique_indices, axis=0)
             regr.fit(corresponding_states, relevant_Q)
+        else:
+            regr.fit(observations, Q)
     except:
         reset = 1
     finally:
