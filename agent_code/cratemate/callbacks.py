@@ -14,7 +14,7 @@ last_actions = np.zeros((0,1), dtype=np.int8)
 # Hyperparameters in [0,1]
 alpha = 0.75     # learning rate
 gamma = 0.95     # discount factor
-epsilon = 0.55   # randomness in policy
+epsilon = 0.15   # randomness in policy
 
 # State representation: Relative coordinates
 # [left, right, top, bottom, coin x, coin y, crate x, crate y, dead end x, dead end y, bomb x, bomb y, bomb flag]
@@ -188,12 +188,12 @@ def act(self):
 
         observation.append(target[0])
         observation.append(target[1])
-
+    '''
     # Negate the distance toward dead ends after placing a bomb
     if not bombs_left:
         observation[8] = -observation[8]
         observation[9] = -observation[9]
-
+    '''
     # Append the bomb flag
     observation.append(not bombs_left)
 
