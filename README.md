@@ -10,4 +10,4 @@ The folder "agent_code" currently contains three versions of the agent:
 The first agent furthermore contains a "backup" subfolder including a good sample dataset,
 recorded logs across ten test games and the corresponding replays. The second and third agent only contain backups of sample datasets.
 
-Inside the folder "scripts" there's a bash script called "n_rounds.sh" that, when placed inside the "logs" folder of an agent, outputs the current round in the terminal in order to show the training progress.
+Inside the folder "scripts" there's a bash script called "n_rounds.sh" that, when placed inside the "logs" folder of an agent, outputs the current round in the terminal every 60 seconds in order to show the training progress.
