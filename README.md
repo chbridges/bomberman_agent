@@ -1,6 +1,6 @@
 # bomberman_agent
 A reinforcement learning agent for the Bomberman framework found at https://github.com/ukoethe/bomberman_rl
-using Q-learning with gradient boosted trees and an ε-greedy exploration-exploitation strategy.
+using Q-learning with gradient boosted trees and an ε-greedy exploration-exploitation strategy, created as a final project within the scope of the lecture "Fundamentals of Machine Learning" at the Heidelberg University.
 
 The folder "agent_code" contains three versions of the agent:
 1. coinllector is coin collecting agent, developed for an arena without crates or enemies
