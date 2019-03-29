@@ -10,6 +10,6 @@ The folder "agent_code" contains three versions of the agent:
 The first agent furthermore contains a "backup" subfolder including a good sample dataset,
 recorded logs across ten test games and the corresponding replays. The second and third agent only contain backups of sample datasets.
 
-The bash script "n_rounds.sh", when placed inside the "logs" folder of an agent, outputs the current round in the terminal every 60 seconds in order to show the training progress.
+The bash script "n_rounds.sh", when placed inside the "logs" folder of an agent, outputs the current round in the terminal every 60 seconds in order to keep track of the training progress.
 
 Inside the folder "report" you can find the report written for the project, including our approaches, experiments and results. My part of the report can be read in "my_report.pdf". The final report, put together by my partner, who is also responsible for the final version of cubi_bot, can be read in "report_final.pdf".
